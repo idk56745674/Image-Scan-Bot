@@ -1,4 +1,4 @@
-"""Tag search: exact matches first, similar tags (substring + vector) when a word has no exact match."""
+
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -21,55 +21,62 @@ class SearchResult:
 
 
 async def ensure_vectors(guild_id: int) -> None:
-    """Embed any tags that don't have a stored vector yet."""
+
     missing = db.tags_missing_vectors(guild_id)
     for i in range(0, len(missing), 64):
         batch = missing[i:i + 64]
         db.save_vectors(guild_id, batch, await ai.embed(batch))
 
 
-async def _similar_tags(guild_id: int, words: list[str], vocab: list[str]) -> dict[str, dict[str, float]]:
-    result: dict[str, dict[str, float]] = {w: {} for w in words}
+async def _fuzzy_tags(guild_id: int, terms: list[str], vocab: list[str]) -> dict[str, dict[str, float]]:
+    result: dict[str, dict[str, float]] = {t: {} for t in terms}
 
 
-    for w in words:
-        if len(w) < 3:
+    for term in terms:
+        if " " in term or len(term) < 3:
             continue
         for tag in vocab:
-            if len(tag) >= 3 and (w in tag or tag in w):
-                result[w][tag] = 0.9
+            if " " not in tag and len(tag) >= 3 and (term in tag or tag in term):
+                result[term][tag] = 0.85
+
 
     try:
         await ensure_vectors(guild_id)
         tags, matrix = db.load_vectors(guild_id)
         if tags:
-            query_vecs = await ai.embed(words)
+            query_vecs = await ai.embed(terms)
             sims = query_vecs @ matrix.T
-            for i, w in enumerate(words):
+            for i, term in enumerate(terms):
                 for j in np.argsort(sims[i])[::-1][:config.SIMILAR_TAGS_PER_WORD]:
                     s = float(sims[i][j])
                     if s >= config.SIMILARITY_THRESHOLD:
-                        result[w][tags[j]] = max(result[w].get(tags[j], 0), s)
-    except Exception as e:  
+                        result[term][tags[j]] = max(result[term].get(tags[j], 0), s)
+    except Exception as e:
         print(f"Vector search unavailable: {e}")
 
     return result
 
 
-async def find_images(guild_id: int, query_words: list[str], limit: int) -> list[SearchResult]:
+async def find_images(guild_id: int, terms: list[str], limit: int) -> list[SearchResult]:
     vocab = db.all_tags(guild_id)
-    vocab_set = set(vocab)
 
+    # term -> {tag: weight}
     expansions: dict[str, dict[str, float]] = {}
     unmatched = []
-    for w in query_words:
-        if w in vocab_set:
-            expansions[w] = {w: 1.0}
-        else:
-            unmatched.append(w)
+    for term in terms:
+        exp: dict[str, float] = {}
+        padded = f" {term} "
+        for tag in vocab:
+            if tag == term:
+                exp[tag] = 1.0
+            elif padded in f" {tag} ":  # whole-word containment, never partial words
+                exp[tag] = 0.9
+        expansions[term] = exp
+        if not exp:
+            unmatched.append(term)
 
     if unmatched and vocab:
-        expansions.update(await _similar_tags(guild_id, unmatched, vocab))
+        expansions.update(await _fuzzy_tags(guild_id, unmatched, vocab))
 
     wanted_tags = {t for exp in expansions.values() for t in exp}
     image_tags: dict[int, set[str]] = defaultdict(set)
@@ -90,6 +97,6 @@ async def find_images(guild_id: int, query_words: list[str], limit: int) -> list
 
     rows = db.get_images(guild_id, [i for _, _, i in top])
     return [
-        SearchResult(score, exact, len(query_words), *rows[image_id])
+        SearchResult(score, exact, len(terms), *rows[image_id])
         for score, exact, image_id in top
     ]

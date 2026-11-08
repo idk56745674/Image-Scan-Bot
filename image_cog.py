@@ -1,4 +1,3 @@
-"""All bot commands/events. Everything except !startscan/!stopscan is disabled until scanning is on."""
 import discord
 from discord.ext import commands
 
@@ -6,7 +5,7 @@ import config
 import database as db
 import scanner
 import search
-from tags import parse_tags
+from tags import parse_query
 
 
 class ImageCog(commands.Cog):
@@ -41,7 +40,7 @@ class ImageCog(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def startscan(self, ctx: commands.Context):
         db.set_scan_enabled(ctx.guild.id, True)
-        await ctx.send("Scanning started.")
+        await ctx.send("Scanning started. I'll index new images posted from now on.")
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
@@ -55,22 +54,23 @@ class ImageCog(commands.Cog):
 
     @commands.command()
     async def searchimg(self, ctx: commands.Context, *, args: str):
+        """!searchimg [count] <tags...>   e.g.  !searchimg 5 white hair, sunlight"""
         parts = args.split()
         limit = config.DEFAULT_RESULTS
         if parts and parts[0].isdigit():
             limit = max(1, min(int(parts[0]), config.MAX_RESULTS))
             parts = parts[1:]
 
-        query_words = parse_tags(" ".join(parts))
+        query_words = parse_query(" ".join(parts), set(db.all_tags(ctx.guild.id)))
         if not query_words:
-            await ctx.send("Please provide search terms!")
+            await ctx.send("Please provide search terms! Example: `!searchimg 5 white hair, sunlight`")
             return
 
         async with ctx.typing():
             results = await search.find_images(ctx.guild.id, query_words, limit)
 
         if not results:
-            await ctx.send(f"No matching images found for: `{' '.join(query_words)}`")
+            await ctx.send(f"No matching images found for: `{', '.join(query_words)}`")
             return
 
         embeds = []
@@ -83,7 +83,6 @@ class ImageCog(commands.Cog):
             embed.set_image(url=r.image_url)
             embed.description = (
                 f"**Tags:** {r.description}\n*Posted by: {r.author}*\n\n"
-                f"🔗 [Jump to Original Message]({r.jump_url})"
             )
             embeds.append(embed)
 
@@ -92,11 +91,8 @@ class ImageCog(commands.Cog):
         except discord.Forbidden:
             await ctx.send(f"{ctx.author.mention} I can't DM you. Please enable DMs from server members.")
             return
-    @commands.command
-    async def h(self, ctx):
-        await ctx.send("Basic usage:\n !startscan - start scanning\n!stopscan - stop scanning\nsearchimg <img amount> tags - search for images with tags, you can send text in the image or usernames as tags\n!isalive - Checks if the bot is alive(If you are seeing this then it is)")
 
-        
+
 
 
 async def setup(bot: commands.Bot):

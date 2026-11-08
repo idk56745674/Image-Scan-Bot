@@ -5,6 +5,7 @@ import discord
 import ai
 import config
 import database as db
+import imaging
 import search
 
 
@@ -24,7 +25,8 @@ async def scan_message(message: discord.Message) -> None:
             if db.image_exists(guild_id, content_hash):
                 continue
 
-            tags = await ai.generate_tags(data)
+            small = await imaging.compress_image(data)
+            tags = await ai.generate_tags(small)
             if not tags:
                 continue
 
