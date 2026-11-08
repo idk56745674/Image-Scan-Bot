@@ -1,4 +1,3 @@
-"""Everything that talks to Ollama: image tagging and text embeddings."""
 import numpy as np
 import ollama
 
