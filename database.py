@@ -70,7 +70,6 @@ def image_exists(guild_id: int, content_hash: str) -> bool:
 
 
 def add_image(guild_id, image_url, tags, author, jump_url, content_hash) -> bool:
-    """Returns False if an identical image (same bytes) is already stored."""
     conn = get_db(guild_id)
     cur = conn.execute(
         "INSERT OR IGNORE INTO image_store "
